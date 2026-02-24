@@ -32,7 +32,14 @@ def _load_from_excel(date_str: str) -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner=False)
 def _collect_live(date_str: str) -> pd.DataFrame:
     """pykrx 실시간 수집 (Streamlit Cloud용)."""
-    return collector.collect(date_str)
+    progress_bar = st.progress(0, text="데이터 수집 준비 중...")
+
+    def _on_progress(ratio, msg):
+        progress_bar.progress(min(ratio, 1.0), text=msg)
+
+    df = collector.collect(date_str, progress_callback=_on_progress)
+    progress_bar.empty()
+    return df
 
 
 def load_data(date_str: str) -> pd.DataFrame:
@@ -74,8 +81,7 @@ with st.sidebar:
 
 # ── 데이터 로드 & 필터 ──────────────────────────────────────
 
-with st.spinner("데이터 수집 중..."):
-    df = load_data(date_str)
+df = load_data(date_str)
 
 if df.empty:
     st.warning("해당 날짜의 데이터가 없습니다. 휴장일이거나 날짜를 확인해 주세요.")
