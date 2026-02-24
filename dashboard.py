@@ -239,6 +239,11 @@ if selected_investors:
     # 주요 투자자 순매수 합계 기준 상위 30
     inv_cols = [c for c in selected_investors if c in df.columns]
     if inv_cols:
+        # 주요 투자자(개인/외국인/기관합계)를 앞으로 정렬
+        major = [c for c in config.MAJOR_INVESTORS if c in inv_cols]
+        others = [c for c in inv_cols if c not in major]
+        inv_cols = major + others
+
         heatmap_df = df.copy()
         for col in inv_cols:
             heatmap_df[col] = to_numeric_investor(heatmap_df, col)
@@ -254,9 +259,15 @@ if selected_investors:
         # 억원 단위로 변환
         heat_values_억 = top30[inv_cols].values / 1e8
 
+        # x축 라벨: 주요 투자자는 볼드
+        x_labels = [
+            f"<b>{c}</b>" if c in config.MAJOR_INVESTORS else c
+            for c in inv_cols
+        ]
+
         fig_heat = go.Figure(data=go.Heatmap(
             z=heat_values_억,
-            x=inv_cols,
+            x=x_labels,
             y=labels,
             colorscale="RdBu",
             zmid=0,
@@ -266,8 +277,9 @@ if selected_investors:
         ))
         fig_heat.update_layout(
             height=max(400, len(labels) * 25),
+            xaxis=dict(side="top"),
             yaxis=dict(autorange="reversed"),
-            margin=dict(l=120),
+            margin=dict(l=120, t=60),
         )
         st.plotly_chart(fig_heat, use_container_width=True)
 
