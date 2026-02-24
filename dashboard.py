@@ -199,33 +199,29 @@ st.caption("💡 금액 단위: 억원")
 display_cols = [c for c in config.COLUMN_ORDER if c in df.columns]
 display_df = df[display_cols].copy()
 
-# 종가, 거래량 → 콤마
-for col in ["종가", "거래량"]:
-    if col in display_df.columns:
-        display_df[col] = display_df[col].apply(format_comma)
-
-# 금액 컬럼 → 억원 콤마
+# 금액 컬럼을 억원 숫자로 변환 (문자열 아닌 숫자 유지 → 정렬 가능)
 money_cols = [c for c in display_df.columns
               if c in config.INVESTORS or c in ("시가총액", "거래대금")]
 for col in money_cols:
     s = display_df[col]
     if s.dtype in ("float64", "int64"):
-        display_df[col] = s.apply(lambda v: f"{round(v / 1e8):,}" if pd.notna(v) else "")
-    # 이미 문자열(엑셀)이면 그대로
+        display_df[col] = (s / 1e8).round(0).astype("int64", errors="ignore")
 
-# 등락률 포맷
+# column_config: 숫자 컬럼에 콤마 포맷 적용
+col_config = {}
+for col in ["종가", "거래량"]:
+    if col in display_df.columns:
+        col_config[col] = st.column_config.NumberColumn(col, format="%d")
+for col in money_cols:
+    if col in display_df.columns:
+        col_config[col] = st.column_config.NumberColumn(col, format="%d")
 if "등락률" in display_df.columns:
-    display_df["등락률"] = display_df["등락률"].apply(
-        lambda x: f"{x:+.2f}%" if isinstance(x, (int, float)) else x
-    )
-
-# 회전율 포맷
+    col_config["등락률"] = st.column_config.NumberColumn("등락률", format="%.2f%%")
 if "회전율" in display_df.columns:
-    display_df["회전율"] = display_df["회전율"].apply(
-        lambda x: f"{x:.4f}%" if isinstance(x, (int, float)) else x
-    )
+    col_config["회전율"] = st.column_config.NumberColumn("회전율", format="%.4f%%")
 
-st.dataframe(display_df, use_container_width=True, height=500)
+st.dataframe(display_df, use_container_width=True, height=500,
+             column_config=col_config)
 
 
 st.markdown("---")
