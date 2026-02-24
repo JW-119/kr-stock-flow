@@ -10,22 +10,20 @@ from openpyxl.utils import get_column_letter
 import config
 
 
-def _format_krw(value):
-    """금액을 한국 원화 단위(조/억/만)로 변환."""
+def _format_억(value):
+    """금액을 억원 단위로 변환 (콤마 포맷)."""
     if not isinstance(value, (int, float)) or pd.isna(value):
         return ""
-    value = float(value)
-    sign = "-" if value < 0 else ""
-    abs_val = abs(value)
-    if abs_val >= 1e12:
-        return f"{sign}{abs_val / 1e12:.2f}조"
-    if abs_val >= 1e8:
-        return f"{sign}{abs_val / 1e8:.1f}억"
-    if abs_val >= 1e4:
-        return f"{sign}{abs_val / 1e4:.0f}만"
-    if abs_val == 0:
-        return "0"
-    return f"{sign}{abs_val:,.0f}"
+    return f"{round(float(value) / 1e8):,}"
+
+
+def _format_comma(value):
+    """숫자에 3자리 콤마 추가."""
+    if not isinstance(value, (int, float)) or pd.isna(value):
+        return ""
+    if isinstance(value, float) and value == int(value):
+        return f"{int(value):,}"
+    return f"{value:,}"
 
 
 def save_to_excel(df: pd.DataFrame, date_str: str):
@@ -44,8 +42,11 @@ def save_to_excel(df: pd.DataFrame, date_str: str):
     file_path = os.path.join(config.DATA_DIR, f"수급_{date_str}.xlsx")
 
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+        unit_note = "(단위: 억원)"
+
         # 1) 전체 시트
-        _write_sheet(writer, df, "전체", f"투자자별 수급 현황 — {date_str}",
+        _write_sheet(writer, df, "전체",
+                     f"투자자별 수급 현황 — {date_str} {unit_note}",
                      config.COLUMN_ORDER)
 
         # 2) 랭킹 시트 (외국인/기관/개인 TOP50)
@@ -56,7 +57,8 @@ def save_to_excel(df: pd.DataFrame, date_str: str):
             cols = config.RANKING_COLUMN_ORDER + [investor]
             cols = [c for c in cols if c in top_df.columns]
             _write_sheet(writer, top_df, sheet_name,
-                         f"{investor} 순매수 TOP 50 — {date_str}", cols)
+                         f"{investor} 순매수 TOP 50 — {date_str} {unit_note}",
+                         cols)
 
     # 스타일 적용
     book = load_workbook(file_path)
@@ -73,15 +75,16 @@ def _write_sheet(writer, df: pd.DataFrame, sheet_name: str, title: str,
     cols = [c for c in columns if c in df.columns]
     out_df = df[cols].copy()
 
-    # 순매수 컬럼은 읽기 쉬운 형식으로 변환
-    investor_cols = [c for c in cols if c in config.INVESTORS]
-    for col in investor_cols:
-        out_df[col] = out_df[col].apply(_format_krw)
-
-    # 시가총액, 거래대금도 변환
-    for col in ["시가총액", "거래대금"]:
+    # 금액 컬럼 → 억원 단위 (콤마)
+    money_cols = [c for c in cols if c in config.INVESTORS or c in ("시가총액", "거래대금")]
+    for col in money_cols:
         if col in out_df.columns:
-            out_df[col] = out_df[col].apply(_format_krw)
+            out_df[col] = out_df[col].apply(_format_억)
+
+    # 종가, 거래량 → 콤마만
+    for col in ["종가", "거래량"]:
+        if col in out_df.columns:
+            out_df[col] = out_df[col].apply(_format_comma)
 
     # 티커를 문자열로 보장
     if "티커" in out_df.columns:

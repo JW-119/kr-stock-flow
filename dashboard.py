@@ -108,26 +108,35 @@ if df.empty:
 # ── 유틸 함수 ───────────────────────────────────────────────
 
 def format_억(value):
-    """숫자를 억 단위로 표시."""
+    """원 단위 숫자를 억원 표시로 변환."""
     if pd.isna(value) or value == 0:
-        return "0"
-    if abs(value) >= 1e12:
-        return f"{value / 1e12:.2f}조"
-    if abs(value) >= 1e8:
-        return f"{value / 1e8:.1f}억"
-    return f"{value:,.0f}"
+        return "0억"
+    return f"{round(float(value) / 1e8):,}억"
+
+
+def format_comma(value):
+    """숫자에 3자리 콤마 추가."""
+    if pd.isna(value):
+        return ""
+    if isinstance(value, float) and value == int(value):
+        return f"{int(value):,}"
+    if isinstance(value, (int, float)):
+        return f"{value:,}"
+    return str(value)
 
 
 def to_numeric_investor(df, col):
-    """투자자 컬럼을 숫자로 변환 (문자열 포맷 → 원래 값)."""
+    """투자자 컬럼을 숫자로 변환 (원 단위 반환)."""
     if col not in df.columns:
         return pd.Series(0, index=df.index)
     s = df[col]
     if s.dtype in ("float64", "int64"):
         return s
-    # 문자열이면 단위 변환 시도
-    return pd.to_numeric(s.astype(str).str.replace(r"[조억만,]", "", regex=True),
-                         errors="coerce").fillna(0)
+    # 엑셀에서 읽은 경우: 억원 단위 콤마 문자열 → 콤마 제거 → 억 → 원으로 복원
+    numeric = pd.to_numeric(
+        s.astype(str).str.replace(",", ""), errors="coerce"
+    ).fillna(0)
+    return numeric * 1e8
 
 
 # ── 1. 시장 요약 metrics ────────────────────────────────────
@@ -143,6 +152,7 @@ for i, inv in enumerate(config.MAJOR_INVESTORS):
             value=format_억(total),
         )
 
+st.caption("💡 금액 단위: 억원")
 st.markdown("---")
 
 
@@ -159,19 +169,19 @@ if selected_investors:
     if bar_data:
         bar_df = pd.DataFrame({
             "투자자": list(bar_data.keys()),
-            "순매수(원)": list(bar_data.values()),
+            "순매수(억원)": [v / 1e8 for v in bar_data.values()],
         })
-        bar_df["색상"] = bar_df["순매수(원)"].apply(lambda x: "매수" if x >= 0 else "매도")
+        bar_df["색상"] = bar_df["순매수(억원)"].apply(lambda x: "매수" if x >= 0 else "매도")
 
         fig_bar = px.bar(
-            bar_df, x="투자자", y="순매수(원)",
+            bar_df, x="투자자", y="순매수(억원)",
             color="색상",
             color_discrete_map={"매수": "#2ca02c", "매도": "#d62728"},
-            text=bar_df["순매수(원)"].apply(format_억),
+            text=bar_df["순매수(억원)"].apply(lambda v: f"{round(v):,}억"),
         )
         fig_bar.update_layout(
             showlegend=False,
-            yaxis_title="순매수 금액",
+            yaxis_title="순매수 (억원)",
             height=400,
         )
         fig_bar.update_traces(textposition="outside")
@@ -184,9 +194,24 @@ st.markdown("---")
 # ── 3. 종목 수급 테이블 ────────────────────────────────────
 
 st.subheader("종목별 수급 현황")
+st.caption("💡 금액 단위: 억원")
 
 display_cols = [c for c in config.COLUMN_ORDER if c in df.columns]
 display_df = df[display_cols].copy()
+
+# 종가, 거래량 → 콤마
+for col in ["종가", "거래량"]:
+    if col in display_df.columns:
+        display_df[col] = display_df[col].apply(format_comma)
+
+# 금액 컬럼 → 억원 콤마
+money_cols = [c for c in display_df.columns
+              if c in config.INVESTORS or c in ("시가총액", "거래대금")]
+for col in money_cols:
+    s = display_df[col]
+    if s.dtype in ("float64", "int64"):
+        display_df[col] = s.apply(lambda v: f"{round(v / 1e8):,}" if pd.notna(v) else "")
+    # 이미 문자열(엑셀)이면 그대로
 
 # 등락률 포맷
 if "등락률" in display_df.columns:
@@ -226,17 +251,18 @@ if selected_investors:
         else:
             labels = top30["티커"].tolist()
 
-        heat_values = top30[inv_cols].values
+        # 억원 단위로 변환
+        heat_values_억 = top30[inv_cols].values / 1e8
 
         fig_heat = go.Figure(data=go.Heatmap(
-            z=heat_values,
+            z=heat_values_억,
             x=inv_cols,
             y=labels,
             colorscale="RdBu",
             zmid=0,
-            text=[[format_억(v) for v in row] for row in heat_values],
+            text=[[f"{round(v):,}" for v in row] for row in heat_values_억],
             texttemplate="%{text}",
-            hovertemplate="종목: %{y}<br>투자자: %{x}<br>순매수: %{text}<extra></extra>",
+            hovertemplate="종목: %{y}<br>투자자: %{x}<br>순매수: %{text}억<extra></extra>",
         ))
         fig_heat.update_layout(
             height=max(400, len(labels) * 25),
@@ -265,16 +291,25 @@ for tab, inv in zip(tabs, ranking_investors):
         rank_df = df.copy()
         rank_df[f"{inv}_num"] = to_numeric_investor(rank_df, inv)
 
-        # TOP 매수
-        st.markdown(f"**{inv} 순매수 TOP 20**")
-        top_buy = rank_df.nlargest(20, f"{inv}_num")
         show_cols = ["티커", "종목명", "시장", "종가", "등락률", inv]
-        show_cols = [c for c in show_cols if c in top_buy.columns]
-        st.dataframe(top_buy[show_cols].reset_index(drop=True),
-                     use_container_width=True)
+        show_cols = [c for c in show_cols if c in rank_df.columns]
+
+        def _fmt_ranking(sub_df):
+            out = sub_df[show_cols].reset_index(drop=True).copy()
+            if "종가" in out.columns:
+                out["종가"] = out["종가"].apply(format_comma)
+            if inv in out.columns:
+                s = out[inv]
+                if s.dtype in ("float64", "int64"):
+                    out[inv] = s.apply(lambda v: f"{round(v / 1e8):,}" if pd.notna(v) else "")
+            return out
+
+        # TOP 매수
+        st.markdown(f"**{inv} 순매수 TOP 20** (억원)")
+        top_buy = rank_df.nlargest(20, f"{inv}_num")
+        st.dataframe(_fmt_ranking(top_buy), use_container_width=True)
 
         # TOP 매도
-        st.markdown(f"**{inv} 순매도 TOP 20**")
+        st.markdown(f"**{inv} 순매도 TOP 20** (억원)")
         top_sell = rank_df.nsmallest(20, f"{inv}_num")
-        st.dataframe(top_sell[show_cols].reset_index(drop=True),
-                     use_container_width=True)
+        st.dataframe(_fmt_ranking(top_sell), use_container_width=True)
