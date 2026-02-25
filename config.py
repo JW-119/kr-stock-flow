@@ -21,11 +21,11 @@ INVESTORS = [
 MAJOR_INVESTORS = ["개인", "외국인", "기관합계"]
 
 # API 호출 딜레이 (초)
-REQUEST_DELAY = 0.5
+REQUEST_DELAY = 0.2
 
 # 재시도 설정
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0
+MAX_RETRIES = 2
+RETRY_BASE_DELAY = 0.5
 
 # 엑셀 컬럼 순서
 COLUMN_ORDER = [
