@@ -1,20 +1,63 @@
 """pykrx 기반 투자자별 수급 데이터 수집 모듈."""
 
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from datetime import datetime
 
 import pandas as pd
+import requests as _requests
 
 pd.set_option("future.no_silent_downcasting", True)
-from pykrx import stock
 
-import config
+# ── pykrx 내부 requests에 기본 타임아웃 설정 (무한 대기 방지) ──
+_original_request = _requests.Session.request
 
 
-def _retry(func, *args, max_retries=config.MAX_RETRIES, **kwargs):
-    """API 호출 재시도 래퍼."""
+def _patched_request(self, *args, **kwargs):
+    kwargs.setdefault("timeout", 15)
+    return _original_request(self, *args, **kwargs)
+
+
+_requests.Session.request = _patched_request
+
+from pykrx import stock  # noqa: E402  — 타임아웃 패치 후 임포트
+
+import config  # noqa: E402
+
+
+def _is_likely_trading_day(date_str: str) -> bool:
+    """간단한 거래일 판별 (주말 제외 + KRX 빠른 체크).
+
+    완벽하지 않지만 주말/공휴일에 28번 API 호출하는 것을 방지.
+    """
+    try:
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        if dt.weekday() >= 5:  # 토/일
+            return False
+        # pykrx로 빠른 체크: OHLCV가 있으면 거래일
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                stock.get_market_ohlcv_by_ticker, date_str, market="KOSPI"
+            )
+            result = future.result(timeout=10)
+            return not result.empty
+    except (FuturesTimeout, Exception):
+        # 타임아웃이면 일단 거래일로 간주 (본 수집에서 개별 타임아웃 처리)
+        return True
+
+
+def _retry(func, *args, max_retries=config.MAX_RETRIES, timeout=20, **kwargs):
+    """API 호출 재시도 래퍼 (타임아웃 포함)."""
     for attempt in range(max_retries):
         try:
-            return func(*args, **kwargs)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(func, *args, **kwargs)
+                return future.result(timeout=timeout)
+        except FuturesTimeout:
+            print(f"[Collector] 타임아웃 ({timeout}s): {func.__name__}")
+            if attempt == max_retries - 1:
+                return pd.DataFrame()
+            time.sleep(config.RETRY_BASE_DELAY)
         except Exception as e:
             if attempt == max_retries - 1:
                 print(f"[Collector] 최종 실패: {func.__name__}{args} — {e}")
@@ -35,6 +78,11 @@ def collect(date: str, progress_callback=None) -> pd.DataFrame:
     Returns:
         전 종목 수급 DataFrame
     """
+    # 비거래일 사전 체크
+    if not _is_likely_trading_day(date):
+        print(f"[Collector] {date}는 비거래일(주말/공휴일)입니다.")
+        return pd.DataFrame()
+
     total_steps = len(config.MARKETS) * (len(config.INVESTORS) + 2)
     current_step = 0
 
@@ -110,11 +158,13 @@ def collect(date: str, progress_callback=None) -> pd.DataFrame:
 
         # 종목명 매핑
         base_df["종목명"] = base_df.index.map(lambda t: name_map.get(t, ""))
-        # 종목명이 비어있는 경우 pykrx 개별 조회 (소수만)
-        missing = base_df[base_df["종목명"] == ""].index
+        # 종목명이 비어있는 경우 pykrx 개별 조회 (최대 50개로 제한)
+        missing = base_df[base_df["종목명"] == ""].index[:50]
         for ticker in missing:
             try:
-                base_df.at[ticker, "종목명"] = stock.get_market_ticker_name(ticker)
+                name = stock.get_market_ticker_name(ticker)
+                if name:
+                    base_df.at[ticker, "종목명"] = name
             except Exception:
                 pass
 
