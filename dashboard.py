@@ -178,7 +178,7 @@ if selected_investors:
             height=400,
         )
         fig_bar.update_traces(textposition="outside")
-        st.plotly_chart(fig_bar, width="stretch")
+        st.plotly_chart(fig_bar, use_container_width=True)
 
 
 st.markdown("---")
@@ -213,7 +213,7 @@ if "등락률" in display_df.columns:
 if "회전율" in display_df.columns:
     col_config["회전율"] = st.column_config.NumberColumn("회전율", format="%.4f%%")
 
-st.dataframe(display_df, width="stretch", height=500,
+st.dataframe(display_df, use_container_width=True, height=500,
              column_config=col_config)
 
 
@@ -270,7 +270,7 @@ if selected_investors:
             yaxis=dict(autorange="reversed"),
             margin=dict(l=120, t=60),
         )
-        st.plotly_chart(fig_heat, width="stretch")
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 
 st.markdown("---")
@@ -308,9 +308,9 @@ for tab, inv in zip(tabs, ranking_investors):
         # TOP 매수
         st.markdown(f"**{inv} 순매수 TOP 20** (억원)")
         top_buy = rank_df.nlargest(20, f"{inv}_num")
-        st.dataframe(_fmt_ranking(top_buy), width="stretch")
+        st.dataframe(_fmt_ranking(top_buy), use_container_width=True)
 
         # TOP 매도
         st.markdown(f"**{inv} 순매도 TOP 20** (억원)")
         top_sell = rank_df.nsmallest(20, f"{inv}_num")
-        st.dataframe(_fmt_ranking(top_sell), width="stretch")
+        st.dataframe(_fmt_ranking(top_sell), use_container_width=True)

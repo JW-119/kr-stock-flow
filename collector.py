@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """pykrx 기반 투자자별 수급 데이터 수집 모듈."""
 
 import time
