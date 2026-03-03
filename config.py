@@ -2,6 +2,23 @@
 
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Streamlit secrets → 환경변수 동기화
+try:
+    import streamlit as st
+    for key in ("KRX_ID", "KRX_PW"):
+        if key not in os.environ:
+            val = st.secrets.get(key, "")
+            if val:
+                os.environ[key] = val
+except Exception:
+    pass
+
 # 경로
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")

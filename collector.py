@@ -22,9 +22,11 @@ def _patched_request(self, *args, **kwargs):
 
 _requests.Session.request = _patched_request
 
-from pykrx import stock  # noqa: E402  — 타임아웃 패치 후 임포트
+import config  # noqa: E402  — dotenv 로드를 위해 먼저 임포트
+import krx_auth  # noqa: E402
+krx_auth.init()
 
-import config  # noqa: E402
+from pykrx import stock  # noqa: E402
 
 
 def _is_likely_trading_day(date_str: str) -> bool:
